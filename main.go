@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/heap"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -115,6 +116,10 @@ func sleep(factor int64) {
  */
 func collect() {
 
+	ch := merge(filter(dataStreaming))
+	for v := range ch {
+		fmt.Println(v)
+	}
 }
 
 // filter split the endless raw data streaming into sections & sort & enqueue it
@@ -175,4 +180,80 @@ func filter(rawStreaming []chan data) []chan data {
 	}
 
 	return chRet
+}
+
+func buildPriorityQueue(nodes []data) priorityQueue {
+	pq := make(priorityQueue, len(nodes))
+
+	for i, v := range nodes {
+		pq[i] = &pqItem{
+			data:  v,
+			index: i,
+		}
+	}
+
+	heap.Init(&pq)
+	return pq
+}
+
+// merge the all individually data streams into the final stream
+func merge(streaming []chan data) <-chan data {
+
+	chRet := make(chan data, clientNums)
+
+	go func(ch chan data) {
+		// commit token => client number
+		m := map[int64]int{}
+
+		size := len(streaming)
+
+		//the priority queue's initialize datas
+		nodes := make([]data, size)
+
+		var wg sync.WaitGroup
+
+		// pick the all clients' first commit data
+		for i := 0; i < size; i++ {
+			wg.Add(1)
+
+			go func(j int) {
+				val := <-streaming[j]
+
+				// which client is the commit token come from
+				m[val.commit] = j
+
+				nodes[j] = val
+				wg.Done()
+			}(i)
+		}
+
+		wg.Wait()
+
+		pq := buildPriorityQueue(nodes)
+
+		var idx int
+		for pq.Len() > 0 {
+			val := heap.Pop(&pq).(*pqItem)
+
+			chRet <- val.data
+
+			idx = m[val.commit]
+
+			//get next value from the outputed data's owner
+			v := <-streaming[idx]
+
+			heap.Push(&pq, &pqItem{
+				data: v,
+			})
+
+			//update the mapping
+			m[v.commit] = idx
+			delete(m, val.commit)
+
+		}
+
+	}(chRet)
+
+	return chRet
+
 }
