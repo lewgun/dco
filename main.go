@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/heap"
+	"context"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -128,14 +129,51 @@ func sleep(factor int64) {
  * and output them in the fastest way you can think
  */
 func collect() {
-	ch := merge(filter(dataStreaming))
+
+	const sigNum = 1000
+	limiter := make(chan struct{}, sigNum)
+
+	signalNow := func() {
+		for i := 0; i < sigNum; i++ {
+			limiter <- struct{}{}
+		}
+	}
+
+	// let it running immediately
+	signalNow()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	exited := make(chan struct{})
+
+	go func(ctx context.Context, exited chan<- struct{}) {
+		ticker := time.NewTicker(100 * time.Second)
+	FOR_LOOP:
+		for {
+			select {
+			case <-ticker.C:
+				signalNow()
+
+			case <-ctx.Done():
+				break FOR_LOOP
+			}
+		}
+		ticker.Stop()
+		exited <- struct{}{}
+
+	}(ctx, exited)
+
+	ch := merge(filter(dataStreaming, limiter))
 	for v := range ch {
 		fmt.Println(v)
 	}
+
+	cancel() //stop the ticker
+	<-exited
 }
 
 // filter split the endless raw data streaming into sections & sort & enqueue it
-func filter(rawStreaming []chan data) []chan data {
+func filter(rawStreaming []chan data, limiter <-chan struct{}) []chan data {
 
 	chRet := make([]chan data, len(rawStreaming))
 	for i, ch := range rawStreaming {
@@ -176,6 +214,7 @@ func filter(rawStreaming []chan data) []chan data {
 				}
 
 				prevData = curData
+				<-limiter
 			}
 
 			//the last section
