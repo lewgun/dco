@@ -42,17 +42,33 @@ func init() {
 }
 
 func main() {
-	wg.Add(clientNums*2 + 1)
+	wg.Add(clientNums*3 + 1)
+
+	sigFinished := make([]chan struct{}, clientNums)
 
 	// generateDatas and collect are parallel
 	for i := 0; i < clientNums; i++ {
+		sigFinished[i] = make(chan struct{}, 2)
 		go func(index int) {
 			defer wg.Done()
 			generateDatas(index)
+
+			sigFinished[index] <- struct{}{}
+
 		}(i)
 		go func(index int) {
 			defer wg.Done()
 			generateDatas(index)
+			sigFinished[index] <- struct{}{}
+
+		}(i)
+
+		go func(index int) {
+			defer wg.Done()
+			<-sigFinished[index]
+			<-sigFinished[index]
+			close(dataStreaming[index])
+
 		}(i)
 	}
 
@@ -115,7 +131,6 @@ func sleep(factor int64) {
  * and output them in the fastest way you can think
  */
 func collect() {
-
 	ch := merge(filter(dataStreaming))
 	for v := range ch {
 		fmt.Println(v)
@@ -174,6 +189,7 @@ func filter(rawStreaming []chan data) []chan data {
 				}
 				buf = nil
 			}
+			close(chRet[index])
 
 		}(i, ch)
 
@@ -239,8 +255,21 @@ func merge(streaming []chan data) <-chan data {
 
 			idx = m[val.commit]
 
+			delete(m, val.commit)
+
+			if streaming[idx] == nil {
+				continue
+			}
+
 			//get next value from the outputed data's owner
-			v := <-streaming[idx]
+			v, ok := <-streaming[idx]
+			if !ok {
+
+				// NOTE:
+				// if the stream is closed, set it to nil, not remove it
+				streaming[idx] = nil
+				continue
+			}
 
 			heap.Push(&pq, &pqItem{
 				data: v,
@@ -248,9 +277,10 @@ func merge(streaming []chan data) <-chan data {
 
 			//update the mapping
 			m[v.commit] = idx
-			delete(m, val.commit)
 
 		}
+
+		close(chRet)
 
 	}(chRet)
 
