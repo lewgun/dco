@@ -97,9 +97,8 @@ func generateDatas(index int) {
 	fmt.Println("max token", maxToken)
 }
 
-
 func incrementToken() int64 {
-	return  atomic.AddInt64(&token, rand.Int63()%maxGap+1)
+	return atomic.AddInt64(&token, rand.Int63()%maxGap+1)
 }
 
 func sleep(factor int64) {
