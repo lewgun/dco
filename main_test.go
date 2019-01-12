@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"fmt"
 	"math/rand"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,7 +15,7 @@ var (
 	clientNums = 2
 
 	// number of messages, simplify program implementation
-	messageNums = 20
+	messageNums = 500
 
 	// assume dataStreaming has unlimited capacity
 	dataStreaming []chan data
@@ -25,7 +26,8 @@ var (
 	maxSleepInterval int64 = 5
 	maxGap           int64 = 10
 
-	wg sync.WaitGroup
+	tt  []int
+	tt2 []int
 )
 
 type data struct {
@@ -34,14 +36,30 @@ type data struct {
 	commit  int64
 }
 
-func init() {
+func initHelper() {
+	tt = nil
+	tt2 = nil
 	dataStreaming = make([]chan data, clientNums)
 	for i := 0; i < clientNums; i++ {
 		dataStreaming[i] = make(chan data, messageNums)
 	}
 }
 
+func init() {
+
+	initHelper()
+}
+
 func main() {
+	for i := 0; i < 100; i++ {
+		initHelper()
+		mainHelper(i)
+	}
+
+}
+func mainHelper(round int) {
+
+	var wg sync.WaitGroup
 	wg.Add(clientNums*3 + 1)
 
 	sigFinished := make([]chan struct{}, clientNums)
@@ -79,6 +97,24 @@ func main() {
 
 	wg.Wait()
 
+	if len(tt) != len(tt2) {
+		fmt.Println("round", round, "length mismatch")
+	}
+
+	sort.Ints(tt)
+
+	var i int
+	for ; i < len(tt); i++ {
+		if tt[i] != tt2[i] {
+			fmt.Println("round", round, "token mismatch", "gen:", tt[i], "output:", tt2[i])
+		}
+
+	}
+
+	if i == len(tt) {
+		fmt.Println("round", round, "size", len(tt), "test passed", "min", tt[0], "max", tt[1])
+	}
+
 }
 
 /*
@@ -88,7 +124,7 @@ func main() {
  */
 func generateDatas(index int) {
 	for i := 0; i < messageNums; i++ {
-		prepare := incrementToken()
+		prepare := incrementToken("prepare")
 		sleep(maxSleepInterval)
 
 		dataStreaming[index] <- data{
@@ -97,7 +133,7 @@ func generateDatas(index int) {
 		}
 		sleep(maxSleepInterval)
 
-		commit := incrementToken()
+		commit := incrementToken("commit")
 		sleep(maxSleepInterval)
 
 		dataStreaming[index] <- data{
@@ -111,8 +147,17 @@ func generateDatas(index int) {
 
 }
 
-func incrementToken() int64 {
-	return atomic.AddInt64(&token, rand.Int63()%maxGap+1)
+var mu sync.Mutex
+
+func incrementToken(kind string) int64 {
+	tok := atomic.AddInt64(&token, rand.Int63()%maxGap+1)
+
+	if kind == "commit" {
+		mu.Lock()
+		tt = append(tt, int(tok))
+		mu.Unlock()
+	}
+	return tok
 }
 
 func sleep(factor int64) {
@@ -130,8 +175,9 @@ func sleep(factor int64) {
 func collect() {
 	ch := merge(filter(dataStreaming))
 	for v := range ch {
-		fmt.Println(v)
+		tt2 = append(tt2, int(v.commit))
 	}
+
 }
 
 // filter split the endless raw data streaming into sections & sort & enqueue it
