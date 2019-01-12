@@ -116,3 +116,63 @@ func sleep(factor int64) {
 func collect() {
 
 }
+
+// filter split the endless raw data streaming into sections & sort & enqueue it
+func filter(rawStreaming []chan data) []chan data {
+
+	chRet := make([]chan data, len(rawStreaming))
+	for i, ch := range rawStreaming {
+
+		//just only one
+		chRet[i] = make(chan data, 1)
+
+		go func(index int, ch <-chan data) {
+
+			var (
+				buf        []data
+				prevData   data
+				minPrepare int64
+			)
+
+			for curData := range ch {
+				if curData.kind == "commit" {
+					buf = append(buf, curData)
+				}
+
+				// 1. split the endless data stream into sections by prepare token
+				// 2. sort the sections
+				// 3. enqueue the sorted sections
+				// see README.md for details
+				if prevData.kind == "prepare" && curData.kind == "prepare" {
+					minPrepare = prevData.prepare
+					if minPrepare > curData.prepare {
+						minPrepare = curData.prepare
+					}
+					if len(buf) != 0 {
+						insertionSort(buf)
+						for _, val := range buf {
+							chRet[index] <- val
+						}
+						buf = nil
+					}
+
+				}
+
+				prevData = curData
+			}
+
+			//the last section
+			if len(buf) != 0 {
+				insertionSort(buf)
+				for _, val := range buf {
+					chRet[index] <- val
+				}
+				buf = nil
+			}
+
+		}(i, ch)
+
+	}
+
+	return chRet
+}
