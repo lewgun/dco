@@ -163,12 +163,14 @@ func collect() {
 
 	}(ctx, exited)
 
+	// the main collect logic: filter -> merge -> output
 	ch := merge(filter(dataStreaming, limiter))
 	for v := range ch {
 		fmt.Println(v)
 	}
 
-	cancel() //stop the ticker
+	// stop the ticker
+	cancel()
 	<-exited
 }
 
@@ -178,7 +180,6 @@ func filter(rawStreaming []chan data, limiter <-chan struct{}) []chan data {
 	chRet := make([]chan data, len(rawStreaming))
 	for i, ch := range rawStreaming {
 
-		//just only one
 		chRet[i] = make(chan data, 1)
 
 		go func(index int, ch <-chan data) {
@@ -254,6 +255,7 @@ func merge(streaming []chan data) <-chan data {
 	chRet := make(chan data, clientNums)
 
 	go func(ch chan data) {
+
 		// commit token => client number
 		m := map[int64]int{}
 
@@ -265,6 +267,7 @@ func merge(streaming []chan data) <-chan data {
 		var wg sync.WaitGroup
 
 		var mu sync.Mutex
+
 		// pick the all clients' first commit data
 		for i := 0; i < size; i++ {
 			wg.Add(1)
@@ -299,7 +302,7 @@ func merge(streaming []chan data) <-chan data {
 				continue
 			}
 
-			//get next value from the outputed data's owner
+			// get the next value from the outputed data's owner
 			v, ok := <-streaming[idx]
 			if !ok {
 
@@ -313,7 +316,7 @@ func merge(streaming []chan data) <-chan data {
 				data: v,
 			})
 
-			//update the mapping
+			// update the mapping
 			m[v.commit] = idx
 
 		}

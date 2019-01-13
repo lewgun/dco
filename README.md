@@ -13,9 +13,11 @@
     
     3. 因为第2步生成的序列基本有序，所以可以采用insertion-sort的方法，将其排序，并将结果值放入channel
 
-2. merge中对前一步产生的多个输出channel进行归并，此处采取的是优先级队列算法，首先从每一个client的channel中
+2. merge中对前一步产生的多个输出channel中已经按commit token升序的data进行归并，此处采取的是优先级队列算法，首先从每一个client的channel中
    取出各自第一条数据，构成起始的队列，然后每次从队列中出队最小commit token的data并输出,然后从此data所属channel
-   中再出队下一个元素，放入队列中，再从队列中出队次小data,重复此出队、放入新值，直到队列为空
+   中再出队下一个元素，放入队列中，再从队列中出队次小data,重复此出队、放入新值操作，直到队列为空
+
+3. 原repo中的代码存在死锁情况，在本repo中添加了相应的处理，但本身未改变原始定义与逻辑   
    
 # TestCase说明:
 此testcase基于原始main.go改造，实现原理如下:
